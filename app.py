@@ -3,6 +3,7 @@ import requests
 import io
 from PIL import Image
 import base64
+import json
 
 # --- Page Setup ---
 st.set_page_config(page_title="✨ Magic Image Creator", layout="centered")
@@ -15,7 +16,7 @@ st.markdown("""
         background: linear-gradient(45deg, #ff9ff3, #f368e0);
         color: white;
         border-radius: 12px;
-        height: 3em;
+        height: 3.5em;
         font-weight: bold;
         width: 100%;
         border: none;
@@ -30,48 +31,56 @@ st.caption("Model: Animagine XL 2.0 • Public Endpoint")
 API_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud"
 
 def process_response(response):
-    """Handles both raw binary and base64 string responses."""
+    """Detects if response is image bytes, base64 string, or an error."""
     content_type = response.headers.get("Content-Type", "")
     
-    # 1. Check if it's already raw bytes (image/png etc)
-    if "image" in content_type:
+    # 1. Successful Binary Image
+    if response.status_code == 200 and "image" in content_type:
         return response.content, None
 
-    # 2. Check if it's a base64 string inside JSON or plain text
+    # 2. Potential Base64 String or JSON Error
     try:
         text_data = response.text
-        # If it looks like base64 (starts with iVBOR...), decode it
-        if text_data.startswith("iVBORw0") or len(text_data) > 1000:
+        # Check if the text is actually a Base64 image (common in some HF setups)
+        if text_data.startswith("iVBORw0") or text_data.startswith("/9j/"):
             return base64.b64decode(text_data), None
         
-        # If it's actual JSON error
-        return None, response.json()
-    except Exception as e:
+        # Try parsing as JSON to see if there's a specific error message
+        error_json = response.json()
+        return None, error_json
+    except:
+        # Fallback to raw text if it's not JSON or Base64
         return None, f"Status {response.status_code}: {response.text}"
 
 def generate_image(prompt_text):
     payload = {
         "inputs": prompt_text,
         "parameters": {
-            "negative_prompt": "lowres, bad anatomy, bad hands, text, error, cropped, low quality",
-            "num_inference_steps": 30,
-            "guidance_scale": 7.5,
+            "negative_prompt": "shirt, clothes, human, lowres, bad anatomy, text, error, cropped, worst quality, low quality",
+            "num_inference_steps": 35,
+            "guidance_scale": 9.0,
             "width": 1024,
             "height": 1024
         }
     }
     
     try:
-        response = requests.post(API_URL, json=payload, timeout=90)
+        response = requests.post(API_URL, json=payload, timeout=120)
         return process_response(response)
     except Exception as e:
         return None, f"Connection Error: {str(e)}"
 
 # --- UI ---
-# Added initial value as requested
+# Optimized prompt for Adiyogi using descriptive tags for the anime model
+default_adiyogi = (
+    "adiyogi shiva statue, large black stone bust, crescent moon in hair, "
+    "serene face, third eye, meditation, mountains background, "
+    "masterpiece, high quality, cinematic lighting, night sky, stars"
+)
+
 prompt = st.text_area(
-    "Describe your anime-style image ✨",
-    value="1girl, solo, long hair, looking at viewer, masterpiece, high quality, cinematic lighting",
+    "Describe your image ✨",
+    value=default_adiyogi,
     height=120
 )
 
@@ -79,24 +88,30 @@ if st.button("✨ Generate Image"):
     if not prompt.strip():
         st.error("Please enter a description.")
     else:
-        with st.spinner("🎨 Creating..."):
-            image_bytes, error = generate_image(prompt)
+        with st.spinner("🎨 Connecting to Hugging Face..."):
+            image_data, error = generate_image(prompt)
             
             if error:
-                st.error("Server Error Detail:")
-                st.code(error) 
+                st.error("Server Error/Response:")
+                # Prints the exact error from the server (JSON or Text)
+                st.code(error)
+                if "loading" in str(error).lower():
+                    st.info("The model is still loading on the GPU. Please try again in 1 minute.")
             else:
                 try:
-                    image = Image.open(io.BytesIO(image_bytes))
+                    image = Image.open(io.BytesIO(image_data))
                     st.success("✨ Success!")
                     st.image(image, use_container_width=True)
                     
+                    # Download
                     buf = io.BytesIO()
                     image.save(buf, format="PNG")
-                    st.download_button("⬇️ Download PNG", buf.getvalue(), "animagine.png", "image/png")
+                    st.download_button("⬇️ Download PNG", buf.getvalue(), "adiyogi.png", "image/png")
                 except Exception as e:
-                    st.error(f"Render Error: {e}")
-                    st.write("First 100 chars of data:", str(image_bytes)[:100])
+                    st.error(f"Failed to process result: {e}")
+                    # Debugging: show what was actually received
+                    st.text("Snippet of received data:")
+                    st.write(str(image_data)[:200])
 
 st.divider()
-st.caption("Powered by Hugging Face Dedicated Endpoints")
+st.caption("Tip: Use tags like 'black stone bust' or 'crescent moon' to help the model identify Adiyogi.")
