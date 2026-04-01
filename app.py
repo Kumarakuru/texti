@@ -9,12 +9,12 @@ st.set_page_config(page_title="✨ Magic Image Creator", layout="centered")
 st.markdown("""
 <style>
     .main {background-color: #0f0f23;}
-    h1 {color: #ff9ff3;}
+    h1 {color: #ff9ff3; font-size: 2.5rem;}
     .stButton>button {
         background: linear-gradient(45deg, #ff9ff3, #f368e0);
         color: white;
         border-radius: 12px;
-        height: 3em;
+        height: 3.2em;
         font-weight: bold;
     }
 </style>
@@ -39,50 +39,67 @@ def wait_for_hf_endpoint(fn, label="Image API", max_wait=180, interval=25):
             return result, None
         except Exception as e:
             elapsed = int(time.time() - start)
-            if "503" not in str(e):
-                return None, f"Error: {str(e)}"
+            err_str = str(e)
+            if "503" not in err_str:
+                return None, f"Error: {err_str}"
             if elapsed >= max_wait:
-                return None, "Endpoint did not wake up in time."
+                return None, f"Endpoint did not wake up after {max_wait//60} minutes."
             attempt += 1
             st.warning(f"⏳ {label} warming up... (attempt {attempt})")
             time.sleep(interval)
 
 # UI
-prompt = st.text_area("Describe your image", 
-    placeholder="A cute baby dragon eating ice cream in a cyberpunk city at night, vibrant colors",
-    height=110)
+prompt = st.text_area(
+    "Describe your image ✨",
+    placeholder="A majestic lion standing in the middle of a mystical forest at golden hour, cinematic lighting",
+    height=120
+)
 
 col1, col2 = st.columns(2)
 with col1:
-    num_images = st.slider("Number of images", 1, 4, 2)
+    n_images = st.slider("Number of images", 1, 4, 2)
 with col2:
     steps = st.slider("Quality (Steps)", 20, 50, 30)
 
 if st.button("✨ Generate Images", type="primary", use_container_width=True):
     if not prompt.strip():
-        st.error("Please write a description!")
+        st.error("Please describe the image!")
     else:
-        with st.spinner("Creating your magic images..."):
-            def generate():
+        with st.spinner("🎨 Generating your images..."):
+            
+            def generate_images():
                 return client.images.generate(
-                    model="black-forest-labs/FLUX.1-schnell",   # change if your endpoint uses different model
+                    model="black-forest-labs/FLUX.1-schnell",   # Change only if your endpoint uses a different model name
                     prompt=prompt,
-                    num_images=num_images,
+                    n=n_images,                    # ← Fixed: use 'n' instead of 'num_images'
                     num_inference_steps=steps,
                     response_format="b64_json"
                 )
 
-            response, error = wait_for_hf_endpoint(generate, label="Image Generation")
+            response, error = wait_for_hf_endpoint(generate_images, label="Image Generation API")
 
             if error:
                 st.error(error)
             else:
-                st.success("Here are your images!")
-                for i, img in enumerate(response.data):
-                    image = Image.open(io.BytesIO(img.b64_json.encode()))
-                    st.image(image, caption=f"Image {i+1}", use_column_width=True)
-                    buf = io.BytesIO()
-                    image.save(buf, format="PNG")
-                    st.download_button(f"⬇️ Download Image {i+1}", buf.getvalue(), f"image_{i+1}.png", mime="image/png")
+                st.success("✨ Here are your images!")
 
-st.caption("Simple & cute Text-to-Image app • Hosted on Streamlit Cloud")
+                for i, img_data in enumerate(response.data):
+                    try:
+                        image_bytes = io.BytesIO(img_data.b64_json.encode())
+                        image = Image.open(image_bytes)
+                        
+                        st.image(image, caption=f"Image {i+1}", use_column_width=True)
+                        
+                        buf = io.BytesIO()
+                        image.save(buf, format="PNG")
+                        st.download_button(
+                            label=f"⬇️ Download Image {i+1}",
+                            data=buf.getvalue(),
+                            file_name=f"magic_image_{i+1}.png",
+                            mime="image/png",
+                            key=f"dl_{i}"
+                        )
+                    except Exception as e:
+                        st.error(f"Failed to show image {i+1}")
+
+st.caption("Simple & cute Text-to-Image app • Hosted on Isha Cloud")
