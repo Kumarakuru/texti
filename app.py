@@ -4,86 +4,52 @@ import io
 from PIL import Image
 import json
 
-# --- Page Config ---
 st.set_page_config(page_title="✨ Magic Image Creator", layout="centered")
 
-st.markdown("""
-<style>
-    .main {background-color: #0f0f23;}
-    h1 {color: #ff9ff3;}
-    .stButton>button {
-        background: linear-gradient(45deg, #ff9ff3, #f368e0);
-        color: white;
-        border-radius: 12px;
-        height: 3em;
-        font-weight: bold;
-        width: 100%;
-        border: none;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.title("✨ Magic Image Creator")
-st.caption("Public Mode • Direct Inference")
-
 # --- CONFIGURATION ---
+# Ensure this is the EXACT URL from your HF 'Direct Search' or 'CURL' tab
 API_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud"
 
-def query_hf_endpoint(prompt_text, steps):
-    payload = {
-        "inputs": prompt_text,
-        "parameters": {
-            "num_inference_steps": steps,
-            "guidance_scale": 7.5
-        }
-    }
+def query_endpoint(prompt_text):
+    # Standard HF payload for Diffusion models
+    payload = {"inputs": prompt_text}
     
-    # Direct POST
-    response = requests.post(API_URL, json=payload)
-    
-    # Check if the response is actually an image
-    content_type = response.headers.get("Content-Type", "")
-    
-    if response.status_code == 200 and "image" in content_type:
-        return response.content, None
-    else:
-        # If not an image, it's likely a JSON error or plain text
-        try:
-            error_data = response.json()
-            error_msg = error_data.get("error", str(error_data))
-        except:
-            error_msg = response.text
+    try:
+        response = requests.post(API_URL, json=payload, timeout=60)
+        
+        # Check if the response is actually an image
+        content_type = response.headers.get("Content-Type", "")
+        
+        if response.status_code == 200 and "image" in content_type:
+            return response.content, "IMAGE"
+        else:
+            # Return the raw text error so we can read it
+            return response.text, "ERROR"
             
-        return None, f"Status {response.status_code}: {error_msg}"
+    except Exception as e:
+        return str(e), "CRASH"
 
 # --- UI ---
-prompt = st.text_area("Describe your image ✨", placeholder="A neon cat in Tokyo...", height=100)
-steps = st.slider("Quality (Steps)", 10, 50, 30)
+st.title("✨ Magic Image Creator")
+prompt = st.text_input("Describe your image", value="A futuristic Singapore skyline")
 
-if st.button("✨ Generate Image"):
-    if not prompt.strip():
-        st.error("Please enter a prompt!")
-    else:
-        with st.spinner("🎨 Connecting..."):
-            image_bytes, error = query_hf_endpoint(prompt, steps)
+if st.button("Generate"):
+    with st.spinner("🎨 Connecting to Endpoint..."):
+        data, result_type = query_endpoint(prompt)
+        
+        if result_type == "IMAGE":
+            image = Image.open(io.BytesIO(data))
+            st.image(image, caption="Generated Result", use_container_width=True)
+            st.success("Success!")
+        elif result_type == "ERROR":
+            st.error("Server returned an error instead of an image:")
+            # This will show you the ACTUAL reason (e.g., 'Model is loading' or 'Out of memory')
+            st.code(data, language="json")
             
-            if error:
-                st.error("Endpoint returned an error instead of an image:")
-                st.code(error) # Shows the actual error from the HF server
-                if "loading" in error.lower():
-                    st.info("The model is currently loading into GPU memory. Please wait a minute and try again.")
-            else:
-                try:
-                    image = Image.open(io.BytesIO(image_bytes))
-                    st.success("✨ Success!")
-                    st.image(image, use_container_width=True)
-                    
-                    buf = io.BytesIO()
-                    image.save(buf, format="PNG")
-                    st.download_button("⬇️ Download PNG", buf.getvalue(), "magic.png", "image/png")
-                except Exception as e:
-                    st.error(f"Image processing failed: {e}")
-                    st.write("Raw response snippet:", image_bytes[:100]) # Debug what was sent
+            if "loading" in data.lower():
+                st.info("The GPU is waking up. Please wait 1-2 minutes and try again.")
+        else:
+            st.error(f"Connection Crash: {data}")
 
 st.divider()
-st.caption("Tip: If you see 'Model Loading', the endpoint just needs a moment to warm up.")
+st.caption("Check your HF Dashboard: Status must be 'Running' and Security must be 'Public'.")
