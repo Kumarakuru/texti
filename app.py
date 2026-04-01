@@ -1,8 +1,9 @@
 import streamlit as st
-from openai import OpenAI
+import requests
 import time
 from PIL import Image
 import io
+import base64
 
 st.set_page_config(page_title="✨ Magic Image Creator", layout="centered")
 
@@ -23,34 +24,12 @@ st.markdown("""
 st.title("✨ Magic Image Creator")
 st.caption("Text to Image • Powered by Hugging Face")
 
-# Your Endpoint
-IMAGE_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud/v1"
-client = OpenAI(base_url=IMAGE_URL.rstrip('/'), api_key="hf_dummy")
+# Your Exact Endpoint
+ENDPOINT_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud/v1/images/generations"
 
-# Warmup Helper
-def wait_for_hf_endpoint(fn, label="Image API", max_wait=180, interval=25):
-    start = time.time()
-    attempt = 0
-    while True:
-        try:
-            result = fn()
-            if attempt > 0:
-                st.success(f"✅ {label} is ready!")
-            return result, None
-        except Exception as e:
-            elapsed = int(time.time() - start)
-            if "503" not in str(e):
-                return None, f"Error: {str(e)}"
-            if elapsed >= max_wait:
-                return None, f"Endpoint did not wake up after {max_wait//60} minutes."
-            attempt += 1
-            st.warning(f"⏳ {label} warming up... (attempt {attempt})")
-            time.sleep(interval)
-
-# UI
 prompt = st.text_area(
     "Describe your image ✨",
-    placeholder="A cute red panda astronaut floating in space, colorful nebula background, highly detailed",
+    placeholder="A cute red panda wearing sunglasses and riding a skateboard in a neon city at night",
     height=120
 )
 
@@ -64,43 +43,53 @@ if st.button("✨ Generate Images", type="primary", use_container_width=True):
     if not prompt.strip():
         st.error("Please describe the image!")
     else:
-        with st.spinner("🎨 Generating your images..."):
-            
-            def generate():
-                return client.images.generate(
-                                model="timbrooks/instruct-pix2pix", # Add model name if required by your endpoint
-                                prompt=prompt,
-                                n=n_images,
-                                response_format="b64_json",
-                                extra_body={
-                                    "num_inference_steps": steps  # Custom HF parameters go here
-                                }
+        with st.spinner("🎨 Generating your images... Please wait"):
+            try:
+                payload = {
+                    "prompt": prompt,
+                    "num_images": n_images,
+                    "num_inference_steps": steps,
+                    "guidance_scale": 7.5,
+                    "response_format": "b64_json"
+                }
+
+                response = requests.post(
+                    ENDPOINT_URL,
+                    json=payload,
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    st.success("✨ Here are your images!")
+
+                    # Handle different possible response formats
+                    images_list = result.get("images") or result.get("data") or [result]
+
+                    for i, item in enumerate(images_list[:n_images]):
+                        try:
+                            b64_str = item.get("b64_json") or item.get("image") or item
+                            image_bytes = base64.b64decode(b64_str)
+                            image = Image.open(io.BytesIO(image_bytes))
+                            
+                            st.image(image, caption=f"Image {i+1}", use_column_width=True)
+                            
+                            buf = io.BytesIO()
+                            image.save(buf, format="PNG")
+                            st.download_button(
+                                label=f"⬇️ Download Image {i+1}",
+                                data=buf.getvalue(),
+                                file_name=f"magic_image_{i+1}.png",
+                                mime="image/png",
+                                key=f"dl_{i}"
                             )
+                        except Exception as e:
+                            st.error(f"Failed to display image {i+1}")
+                else:
+                    st.error(f"API Error {response.status_code}: {response.text}")
 
-            response, error = wait_for_hf_endpoint(generate, label="Image Generation")
+            except Exception as e:
+                st.error(f"Request failed: {str(e)}")
 
-            if error:
-                st.error(error)
-            else:
-                st.success("✨ Here are your images!")
-
-                for i, img_data in enumerate(response.data):
-                    try:
-                        image_bytes = io.BytesIO(img_data.b64_json.encode())
-                        image = Image.open(image_bytes)
-                        
-                        st.image(image, caption=f"Image {i+1}", use_column_width=True)
-                        
-                        buf = io.BytesIO()
-                        image.save(buf, format="PNG")
-                        st.download_button(
-                            label=f"⬇️ Download Image {i+1}",
-                            data=buf.getvalue(),
-                            file_name=f"magic_image_{i+1}.png",
-                            mime="image/png",
-                            key=f"dl_{i}"
-                        )
-                    except Exception as e:
-                        st.error(f"Failed to display image {i+1}")
-
-st.caption("Simple & cute Text-to-Image app • Hosted on Streamlit Cloud")
+st.caption("Simple Text-to-Image app • Hosted on Streamlit Cloud")
