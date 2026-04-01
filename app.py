@@ -1,59 +1,92 @@
 import streamlit as st
-from openai import OpenAI
-import time
-from PIL import Image
-import io
-import base64
 import requests
+import io
+from PIL import Image
+import time
 
+# --- Page Config ---
 st.set_page_config(page_title="✨ Magic Image Creator", layout="centered")
 
-# --- CONFIGURATION ---
-# Base URL for Hugging Face Dedicated Endpoints
-IMAGE_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud"
-HF_TOKEN = "hf_dummy" # Replace with your actual token if needed
-
-client = OpenAI(base_url=IMAGE_URL, api_key=HF_TOKEN)
+st.markdown("""
+<style>
+    .main {background-color: #0f0f23;}
+    h1 {color: #ff9ff3;}
+    .stButton>button {
+        background: linear-gradient(45deg, #ff9ff3, #f368e0);
+        color: white;
+        border-radius: 12px;
+        height: 3em;
+        font-weight: bold;
+        width: 100%;
+        border: none;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 st.title("✨ Magic Image Creator")
+st.caption("Direct Endpoint Connection • Public Mode")
 
-# UI Elements
-prompt = st.text_area("Describe your image ✨", value="A cute red panda")
-steps = st.slider("Quality (Steps)", 20, 50, 30)
+# --- CONFIGURATION ---
+# Use the exact URL from your HF dashboard
+API_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud"
 
-if st.button("✨ Generate & Debug", type="primary"):
-    # --- DEBUGGING INFO ---
-    # This is the path the OpenAI SDK constructs internally
-    target_url = f"{IMAGE_URL}/images/generations"
-    st.info(f"Connecting to: `{target_url}`")
+def query_hf_endpoint(prompt_text, steps):
+    # HF Endpoints typically expect "inputs" for the prompt
+    payload = {
+        "inputs": prompt_text,
+        "parameters": {
+            "num_inference_steps": steps,
+            "guidance_scale": 7.5
+        }
+    }
     
-    with st.spinner("🎨 Generating..."):
-        try:
-            # We use extra_body to pass custom HF parameters
-            response = client.images.generate(
-                model="timbrooks/instruct-pix2pix", 
-                prompt=prompt,
-                n=1,
-                response_format="b64_json",
-                extra_body={"num_inference_steps": steps}
-            )
+    # Direct POST request with no Authorization header
+    response = requests.post(API_URL, json=payload)
+    
+    if response.status_code == 200:
+        return response.content, None
+    elif response.status_code == 503:
+        return None, "Endpoint is warming up... try again in 30s."
+    elif response.status_code == 404:
+        return None, "404 Error: Ensure the Endpoint URL is exactly correct and 'Public'."
+    else:
+        return None, f"Error {response.status_code}: {response.text}"
+
+# --- UI ---
+prompt = st.text_area(
+    "Describe your image ✨",
+    placeholder="A cute red panda astronaut...",
+    height=120
+)
+
+steps = st.slider("Quality (Steps)", 10, 50, 30)
+
+if st.button("✨ Generate Image"):
+    if not prompt.strip():
+        st.error("Please enter a prompt!")
+    else:
+        with st.spinner("🎨 Connecting to Hugging Face..."):
+            image_bytes, error = query_hf_endpoint(prompt, steps)
             
-            # If successful, display image
-            img_b64 = response.data[0].b64_json
-            image = Image.open(io.BytesIO(base64.b64decode(img_b64)))
-            st.image(image, caption="Generated Image")
-            
-        except Exception as e:
-            st.error(f"Error Type: {type(e).__name__}")
-            st.error(f"Message: {str(e)}")
-            
-            # Additional check: Is the endpoint even reachable?
-            st.markdown("---")
-            st.subheader("Network Check")
-            try:
-                health_check = requests.get(IMAGE_URL)
-                st.write(f"Endpoint Root Status: {health_check.status_code}")
-                if health_check.status_code == 404:
-                    st.warning("The root URL exists but the path /images/generations might not be enabled on this HF endpoint.")
-            except Exception as net_err:
-                st.error(f"Network Connection Failed: {net_err}")
+            if error:
+                st.error(error)
+            else:
+                try:
+                    image = Image.open(io.BytesIO(image_bytes))
+                    st.success("✨ Image Generated!")
+                    st.image(image, use_container_width=True)
+                    
+                    # Download Setup
+                    buf = io.BytesIO()
+                    image.save(buf, format="PNG")
+                    st.download_button(
+                        label="⬇️ Download PNG",
+                        data=buf.getvalue(),
+                        file_name="generated_magic.png",
+                        mime="image/png"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to process image data: {e}")
+
+st.divider()
+st.caption("Running on Streamlit Cloud • Powered by HF Dedicated Endpoints")
