@@ -68,11 +68,14 @@ if st.button("✨ Generate Images", type="primary", use_container_width=True):
             
             def generate():
                 return client.images.generate(
-                    prompt=prompt,
-                    n=n_images,                    # Correct parameter
-                    num_inference_steps=steps,     # Some endpoints accept this
-                    response_format="b64_json"
-                )
+                                model="timbrooks/instruct-pix2pix", # Add model name if required by your endpoint
+                                prompt=prompt,
+                                n=n_images,
+                                response_format="b64_json",
+                                extra_body={
+                                    "num_inference_steps": steps  # Custom HF parameters go here
+                                }
+                            )
 
             response, error = wait_for_hf_endpoint(generate, label="Image Generation")
 
