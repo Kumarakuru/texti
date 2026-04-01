@@ -9,7 +9,7 @@ st.set_page_config(page_title="✨ Magic Image Creator", layout="centered")
 st.markdown("""
 <style>
     .main {background-color: #0f0f23;}
-    h1 {color: #ff9ff3; font-size: 2.5rem;}
+    h1 {color: #ff9ff3;}
     .stButton>button {
         background: linear-gradient(45deg, #ff9ff3, #f368e0);
         color: white;
@@ -27,7 +27,7 @@ st.caption("Text to Image • Powered by Hugging Face")
 IMAGE_URL = "https://ecqhp03p8738815i.us-east-1.aws.endpoints.huggingface.cloud/v1"
 client = OpenAI(base_url=IMAGE_URL.rstrip('/'), api_key="hf_dummy")
 
-# Warmup Helper (same as your Shopify app)
+# Warmup Helper
 def wait_for_hf_endpoint(fn, label="Image API", max_wait=180, interval=25):
     start = time.time()
     attempt = 0
@@ -39,9 +39,8 @@ def wait_for_hf_endpoint(fn, label="Image API", max_wait=180, interval=25):
             return result, None
         except Exception as e:
             elapsed = int(time.time() - start)
-            err_str = str(e)
-            if "503" not in err_str:
-                return None, f"Error: {err_str}"
+            if "503" not in str(e):
+                return None, f"Error: {str(e)}"
             if elapsed >= max_wait:
                 return None, f"Endpoint did not wake up after {max_wait//60} minutes."
             attempt += 1
@@ -51,7 +50,7 @@ def wait_for_hf_endpoint(fn, label="Image API", max_wait=180, interval=25):
 # UI
 prompt = st.text_area(
     "Describe your image ✨",
-    placeholder="A majestic lion standing in the middle of a mystical forest at golden hour, cinematic lighting",
+    placeholder="A cute red panda astronaut floating in space, colorful nebula background, highly detailed",
     height=120
 )
 
@@ -67,16 +66,15 @@ if st.button("✨ Generate Images", type="primary", use_container_width=True):
     else:
         with st.spinner("🎨 Generating your images..."):
             
-            def generate_images():
+            def generate():
                 return client.images.generate(
-                    model="black-forest-labs/FLUX.1-schnell",   # Change only if your endpoint uses a different model name
                     prompt=prompt,
-                    n=n_images,                    # ← Fixed: use 'n' instead of 'num_images'
-                    num_inference_steps=steps,
+                    n=n_images,                    # Correct parameter
+                    num_inference_steps=steps,     # Some endpoints accept this
                     response_format="b64_json"
                 )
 
-            response, error = wait_for_hf_endpoint(generate_images, label="Image Generation API")
+            response, error = wait_for_hf_endpoint(generate, label="Image Generation")
 
             if error:
                 st.error(error)
@@ -100,6 +98,6 @@ if st.button("✨ Generate Images", type="primary", use_container_width=True):
                             key=f"dl_{i}"
                         )
                     except Exception as e:
-                        st.error(f"Failed to show image {i+1}")
+                        st.error(f"Failed to display image {i+1}")
 
-st.caption("Simple & cute Text-to-Image app • Hosted on Isha Cloud")
+st.caption("Simple & cute Text-to-Image app • Hosted on Streamlit Cloud")
