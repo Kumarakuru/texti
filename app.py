@@ -61,60 +61,44 @@ def generate_image(prompt_text):
 
 # --- Updated Configuration ---
 # --- 2026 Bulletproof Config ---
- 
-# Use the 1.3B 'Small' version which has the highest uptime on the serverless tier
-VIDEO_MODEL = "Wan-AI/Wan2.1-T2V-1.3B"
-# Let the Router choose the best provider automatically
-VIDEO_PROVIDER = "auto"
+ # --- UPDATED VIDEO CONFIG ---
+VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # Direct Router URL - This bypasses the library's internal ValueError checks
-    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}"
-    
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json",
-        "x-use-cache": "false",
-        "x-wait-for-model": "true" # Critical: prevents 503 while GPU loads
-    }
-    
-    payload = {
-        "inputs": prompt_text,
-        "provider": "fal-ai", # We force fal-ai here because we'll parse it manually
-        "parameters": {
-            "num_frames": 16,
-            "fps": 8
-        }
-    }
-
     try:
-        with st.spinner("🎥 Forcing direct route to GPU..."):
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
-            
-            if response.status_code != 200:
-                return None, f"Router Error {response.status_code}: {response.text}"
+        from huggingface_hub import InferenceClient
+        import tempfile, os
 
-            result = response.json()
-            
-            # --- THE FIX FOR THE KEYERROR ---
-            # We look for the URL without assuming the 'video' key exists
-            video_url = None
-            if isinstance(result, dict):
-                # Try all common return paths from 2026 providers
-                video_url = (
-                    result.get("url") or 
-                    (result.get("video", {}) if isinstance(result.get("video"), str) else result.get("video", {}).get("url")) or
-                    result.get("output")
-                )
-            
-            if video_url and isinstance(video_url, str) and video_url.startswith("http"):
-                video_bytes = requests.get(video_url, timeout=60).content
-                return video_bytes, "SUCCESS"
-            
-            return None, f"No URL found in response: {result}"
+        client = InferenceClient(
+            provider="fal-ai",
+            api_key=HF_TOKEN,
+        )
+
+        with st.spinner("🎥 Generating video via fal-ai... (may take 1-3 min)"):
+            # Returns a path to a temp video file
+            video = client.text_to_video(
+                prompt_text,
+                model=VIDEO_MODEL,
+            )
+
+        # video is an httpx.Response or bytes-like — handle both
+        if hasattr(video, 'read'):
+            video_bytes = video.read()
+        elif hasattr(video, 'content'):
+            video_bytes = video.content
+        elif isinstance(video, (bytes, bytearray)):
+            video_bytes = bytes(video)
+        else:
+            # Some versions return a file path string
+            with open(str(video), "rb") as f:
+                video_bytes = f.read()
+
+        if video_bytes:
+            return video_bytes, "SUCCESS"
+        return None, "Empty response from provider."
 
     except Exception as e:
         import traceback
