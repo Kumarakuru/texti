@@ -68,46 +68,41 @@ def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # Using the updated Router endpoint
-    client = InferenceClient(
-        api_key=HF_TOKEN,
-        base_url="https://router.huggingface.co/hf-inference"
-    )
+    # We use the raw URL to bypass the broken library helper
+    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    
+    payload = {
+        "inputs": prompt_text,
+        "parameters": {"num_frames": 16},
+        "provider": "fal-ai"
+    }
 
     try:
-        with st.spinner("🎥 Generating video... (this may take a minute)"):
-            # We call the model via the task-specific method
-            # If tencent/HunyuanVideo is busy, try: "Lightricks/LTX-Video"
-            result = client.text_to_video(
-                prompt=prompt_text,
-                model=VIDEO_MODEL,
-                extra_body={"num_frames": 16}
-            )
+        with st.spinner("🎥 Generating video..."):
+            # Using standard requests to avoid the library's internal KeyError
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
+            
+            if response.status_code != 200:
+                return None, f"API Error {response.status_code}: {response.text}"
 
-            # --- GREEDY PARSING ---
-            # This handles the KeyError by checking all possible locations for the URL
+            result = response.json()
+            
+            # Now we parse it safely without crashing
             video_url = None
-            
-            if isinstance(result, (bytes, bytearray)):
-                return result, "SUCCESS"
-            
             if isinstance(result, dict):
-                # Check every common nesting pattern to avoid KeyError
+                # Try all possible keys fal-ai might return
                 video_url = (
                     result.get("url") or 
                     result.get("video", {}).get("url") if isinstance(result.get("video"), dict) else None or
                     result.get("output", {}).get("url") if isinstance(result.get("output"), dict) else None
                 )
-                
-                # Fallback: if the result IS just a string URL
-                if not video_url and isinstance(result.get("video"), str):
-                    video_url = result["video"]
-
-            if video_url:
-                response = requests.get(video_url, timeout=60)
-                return response.content, "SUCCESS"
             
-            return None, f"Could not find video URL in response: {result}"
+            if video_url:
+                video_bytes = requests.get(video_url, timeout=60).content
+                return video_bytes, "SUCCESS"
+            
+            return None, f"Could not find URL in response. Raw response: {result}"
 
     except Exception as e:
         import traceback
