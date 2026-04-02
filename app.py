@@ -61,58 +61,35 @@ def generate_image(prompt_text):
 
 # --- Updated Configuration ---
 # --- 2026 Bulletproof Config ---
-VIDEO_MODEL = "Wan-AI/Wan2.1-T2V-1.3B" # The most stable 'warm' model on the router
-VIDEO_PROVIDER = "replicate"
+ 
+VIDEO_MODEL = "Lightricks/LTX-Video" 
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # This is the 'Master' Router URL for Task-based inference in 2026
-    # We use the base model path and let the JSON payload define the task
-    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}"
-    
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json",
-        "x-use-cache": "false",
-        "x-wait-for-model": "true"
-    }
-    
-    payload = {
-        "inputs": prompt_text,
-        "provider": VIDEO_PROVIDER,
-        "parameters": {
-            "num_frames": 16,
-            "fps": 8
-        }
-    }
+    # In 2026, we initialize the client with the provider directly
+    client = InferenceClient(provider="replicate", api_key=HF_TOKEN)
 
     try:
-        with st.spinner(f"🎥 Connecting to {VIDEO_PROVIDER} via Master Router..."):
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
-            
-            # If we get a 404 here, the model is simply not on the serverless tier.
-            if response.status_code != 200:
-                return None, f"Router Error {response.status_code}: {response.text}"
+        with st.spinner("🎥 Routing request to Replicate via HF Router..."):
+            # The library now handles the 'router.huggingface.co' URL internally
+            # specifying the model and the task clearly.
+            video_bytes = client.text_to_video(
+                prompt_text,
+                model=VIDEO_MODEL,
+            )
 
-            result = response.json()
-            
-            # 2026 Router returns a 'url' key or a 'video' object
-            video_url = None
-            if isinstance(result, dict):
-                video_url = result.get("url") or result.get("video", {}).get("url")
-            elif isinstance(result, list) and len(result) > 0:
-                video_url = result[0].get("url")
-
-            if video_url:
-                video_bytes = requests.get(video_url, timeout=60).content
+            if video_bytes:
                 return video_bytes, "SUCCESS"
             
-            return None, f"Request successful but no URL in response: {result}"
+            return None, "No video data returned."
 
     except Exception as e:
-        import traceback
+        # If this STILL gives a KeyError or 404, we catch the raw response
+        error_msg = str(e)
+        if "KeyError" in error_msg:
+            return None, "Provider Schema Mismatch: The library is bugged. Use 'pip install --upgrade huggingface_hub'."
         return None, traceback.format_exc()
 
 
