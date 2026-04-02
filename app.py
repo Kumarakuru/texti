@@ -23,14 +23,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎬 Media Creator")
-st.caption("Image: Dedicated Endpoint • Video: Inference Providers")
+st.caption("Image: Dedicated Endpoint • Video: Inference Providers (fal-ai)")
 
 # --- CONFIGURATION ---
 IMAGE_API_URL = "https://ylouolgkl7x17uss.eu-west-1.aws.endpoints.huggingface.cloud"
 
-# Recommended Video Settings
-VIDEO_MODEL = "Lightricks/LTX-Video"      # Change if you want to try another model
-VIDEO_PROVIDER = "fal-ai"                 # Fixed: Use 'fal-ai' (not 'fal')
+# Video Configuration - Changed to a proper text-to-video model
+VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"     # Good quality + supported for text-to-video
+VIDEO_PROVIDER = "fal-ai"
 
 HF_TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
 
@@ -60,35 +60,32 @@ def generate_image(prompt_text):
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
-        return None, "❌ HF_TOKEN is missing. Add it in Streamlit secrets or environment variables."
+        return None, "❌ HF_TOKEN is missing. Add it in Streamlit secrets or as environment variable."
 
     client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
 
     try:
-        with st.spinner("🎥 Generating video... (usually 30–90 seconds)"):
-            # Most providers accept parameters via extra_body for text_to_video
+        with st.spinner("🎥 Generating video... (this usually takes 40–120 seconds)"):
             video_bytes = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
                 extra_body={
-                    "num_frames": 16,   # Short clip
+                    "num_frames": 16,   # Short video (~2 seconds at 8 fps)
                     "fps": 8,
                 }
             )
         return video_bytes, "SUCCESS"
     except Exception as e:
         error_str = str(e).lower()
+        # Auto fallback if provider/model issue
         if "not supported" in error_str or "fal-ai" in error_str:
-            # Fallback: Let HF auto-select the best available provider for this model
             try:
+                st.info("Trying with auto provider selection...")
                 client = InferenceClient(provider="auto", api_key=HF_TOKEN)
-                video_bytes = client.text_to_video(
-                    prompt=prompt_text,
-                    model=VIDEO_MODEL
-                )
+                video_bytes = client.text_to_video(prompt=prompt_text, model=VIDEO_MODEL)
                 return video_bytes, "SUCCESS (auto provider)"
             except Exception as e2:
-                return None, f"Video failed: {str(e2)}"
+                return None, f"Failed with auto provider: {str(e2)}"
         return None, f"Video generation failed: {str(e)}"
 
 # --- UI ---
@@ -118,10 +115,10 @@ if st.button(f"✨ Generate {gen_mode}"):
                 else:
                     st.error(status)
 
-        else:  # Video
+        else:  # Video mode
             if not HF_TOKEN:
-                st.error("HF_TOKEN is required for video.")
-                st.info("Create a token at https://huggingface.co/settings/tokens and add it as secret `HF_TOKEN`")
+                st.error("HF_TOKEN is required for video generation.")
+                st.info("Create a token at https://huggingface.co/settings/tokens (with inference permission) and add it as secret `HF_TOKEN`")
             else:
                 video_bytes, status = generate_video(prompt)
                 
@@ -136,6 +133,14 @@ if st.button(f"✨ Generate {gen_mode}"):
                 else:
                     st.error(status)
 
-st.divider() 
+st.divider()
+st.info("""
+**Current Setup:**
+- **Image**: Your dedicated fast endpoint
+- **Video**: Wan-AI/Wan2.2-TI2V-5B via fal-ai (proper text-to-video model)
 
-st.markdown("Made with ❤️ by Isha - Powered by Hugging Face & Streamlit")
+**Tips:**
+- Start with short, simple prompts to save credits.
+- Video generation is slower and more expensive than images.
+- If you still get errors, try changing `VIDEO_MODEL` to `"tencent/HunyuanVideo"` or `"Wan-AI/Wan2.1-T2V-14B"`.
+""")
