@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import io
 from PIL import Image
-import base64
 from huggingface_hub import InferenceClient
 import os
 
@@ -29,12 +28,10 @@ st.caption("Image: Dedicated Endpoint • Video: Inference Providers (fal)")
 # --- CONFIGURATION ---
 IMAGE_API_URL = "https://ylouolgkl7x17uss.eu-west-1.aws.endpoints.huggingface.cloud"
 
-# For Video - Choose a good model + provider
-# Recommended: Lightricks/LTX-Video (fast & good quality) or Wan-AI models
-VIDEO_MODEL = "Lightricks/LTX-Video"          # Change if you want another model
-VIDEO_PROVIDER = "fal"                        # "fal", "replicate", "hyperbolic" — fal is often fast for video
+# Video Configuration - Recommended settings
+VIDEO_MODEL = "Lightricks/LTX-Video"      # Good balance of speed & quality
+VIDEO_PROVIDER = "fal"                    # "fal", "replicate", or "hyperbolic"
 
-# Get HF Token from secrets (recommended) or environment
 HF_TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
 
 def process_image_response(response):
@@ -42,7 +39,7 @@ def process_image_response(response):
     if response.status_code == 200:
         if "image" in ctype or "octet-stream" in ctype:
             return response.content, "SUCCESS"
-    return None, f"Error {response.status_code}: {response.text[:200]}"
+    return None, f"Error {response.status_code}: {response.text[:300]}"
 
 def generate_image(prompt_text):
     payload = {
@@ -63,23 +60,36 @@ def generate_image(prompt_text):
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
-        return None, "❌ HF_TOKEN is missing. Add it in Streamlit secrets or environment variables."
+        return None, "❌ HF_TOKEN is missing. Please add it in Streamlit secrets or as environment variable."
 
     client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
 
     try:
-        with st.spinner("Generating video... (this can take 20-90 seconds)"):
+        with st.spinner("🎥 Generating video... This can take 30–90 seconds depending on the provider."):
             video_bytes = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
-                # Optional parameters (supported by some models/providers)
-                num_frames=16,      # short video
-                fps=8,
-                # You can add more if the model supports: height=480, width=720, etc.
+                extra_body={
+                    "num_frames": 16,      # Short video (adjust if model supports)
+                    "fps": 8,              # Frames per second
+                    # You can add more provider-specific params here if needed
+                }
             )
         return video_bytes, "SUCCESS"
     except Exception as e:
-        return None, f"Video generation failed: {str(e)}"
+        error_msg = str(e)
+        if "unexpected keyword" in error_msg.lower():
+            error_msg = "Parameter error. Trying without extra parameters..."
+            # Fallback: try without extra_body
+            try:
+                video_bytes = client.text_to_video(
+                    prompt=prompt_text,
+                    model=VIDEO_MODEL
+                )
+                return video_bytes, "SUCCESS"
+            except Exception as e2:
+                error_msg = str(e2)
+        return None, f"Video generation failed: {error_msg}"
 
 # --- UI ---
 default_prompt = (
@@ -99,7 +109,6 @@ if st.button(f"✨ Generate {gen_mode}"):
         if gen_mode == "Image":
             with st.spinner("Generating image..."):
                 data, status = generate_image(prompt)
-                
                 if status == "SUCCESS":
                     image = Image.open(io.BytesIO(data))
                     st.image(image, use_container_width=True)
@@ -111,27 +120,21 @@ if st.button(f"✨ Generate {gen_mode}"):
 
         else:  # Video mode
             if not HF_TOKEN:
-                st.error("HF_TOKEN is required for video generation. Please add it.")
-                st.info("Go to https://huggingface.co/settings/tokens → Create a new token (read + write) and add it to Streamlit secrets as `HF_TOKEN`")
+                st.error("HF_TOKEN is required for video generation.")
+                st.info("→ Create a token at https://huggingface.co/settings/tokens and add it as secret `HF_TOKEN`")
             else:
                 video_bytes, status = generate_video(prompt)
                 
                 if status == "SUCCESS":
-                    st.video(video_bytes)
+                    st.video(video_bytes, autoplay=False)
                     st.download_button(
                         "⬇️ Download Video", 
                         video_bytes, 
-                        "output.mp4", 
+                        "generated_video.mp4", 
                         "video/mp4"
                     )
                 else:
                     st.error(status)
 
 st.divider()
-st.info("""
-**How it works now:**
-- **Image**: Uses your existing dedicated Inference Endpoint (fast & cheap for images)
-- **Video**: Uses Hugging Face Inference Providers (fal recommended) — pay-per-use, no dedicated GPU needed
-
-**Tip**: Text-to-video is more expensive than images. Start with short prompts and test with your free monthly credits first.
-""")
+st.markdown("Made with ❤️ by Isha - Powered by Hugging Face & Streamlit")
