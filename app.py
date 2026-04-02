@@ -60,30 +60,23 @@ def generate_image(prompt_text):
         return None, f"Connection Failed: {str(e)}"
 
 # --- Updated Configuration ---
-# HunyuanVideo is currently the top-performing open model
-VIDEO_MODEL = "tencent/HunyuanVideo" 
-VIDEO_PROVIDER = "hf-inference" # Use Hugging Face's own router
-
-# --- Updated Configuration ---
-VIDEO_MODEL = "Lightricks/LTX-Video" 
-VIDEO_PROVIDER = "replicate"  # Switching to the stable provider
-
-# --- Use HunyuanVideo as it is the most stable for Text-to-Video ---
-VIDEO_MODEL = "tencent/HunyuanVideo"
-VIDEO_PROVIDER = "replicate" 
+ # --- Configuration ---
+VIDEO_MODEL = "tencent/HunyuanVideo" # Most robust for T2V
+VIDEO_PROVIDER = "replicate"        # Stable alternative to fal-ai
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # Direct URL to the Hugging Face Router
-    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}"
+    # Use the Canonical Pipeline URL to avoid 404
+    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}/pipeline/text-to-video"
+    
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-use-cache": "false"
     }
     
-    # We send the provider inside the JSON payload
     payload = {
         "inputs": prompt_text,
         "provider": VIDEO_PROVIDER,
@@ -94,16 +87,17 @@ def generate_video(prompt_text):
     }
 
     try:
-        with st.spinner(f"🎥 Generating via {VIDEO_PROVIDER}..."):
-            # Using standard requests bypasses the broken HF library code
+        with st.spinner(f"🎥 Generating via {VIDEO_PROVIDER} (Router)..."):
+            # Direct POST bypasses the library's internal KeyError bugs
             response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
             
             if response.status_code != 200:
-                return None, f"API Error {response.status_code}: {response.text}"
+                # If we still see 404, the model isn't mapped to that provider
+                return None, f"Router Error {response.status_code}: {response.text}"
 
             result = response.json()
             
-            # Replicate/Router usually returns a dictionary with 'url'
+            # Router responses for video usually return a direct URL
             video_url = None
             if isinstance(result, dict):
                 video_url = result.get("url") or result.get("video", {}).get("url")
@@ -114,11 +108,13 @@ def generate_video(prompt_text):
                 video_bytes = requests.get(video_url, timeout=60).content
                 return video_bytes, "SUCCESS"
             
-            return None, f"Could not find URL in response: {result}"
+            return None, f"Task completed but no URL found in: {result}"
 
     except Exception as e:
         import traceback
         return None, traceback.format_exc()
+
+
 
 # --- UI ---
 default_prompt = "A cute cat meowing softly in a cozy room, realistic, detailed fur, warm lighting"
