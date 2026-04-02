@@ -63,7 +63,7 @@ def generate_image(prompt_text):
  # --- Configuration ---
 # --- Stable Config ---
 # --- 2026 Stable Config ---
-VIDEO_MODEL = "tencent/HunyuanVideo"
+VIDEO_MODEL = "Lightricks/LTX-Video"
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
