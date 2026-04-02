@@ -68,34 +68,55 @@ VIDEO_PROVIDER = "hf-inference" # Use Hugging Face's own router
 VIDEO_MODEL = "Lightricks/LTX-Video" 
 VIDEO_PROVIDER = "replicate"  # Switching to the stable provider
 
+# --- Use HunyuanVideo as it is the most stable for Text-to-Video ---
+VIDEO_MODEL = "tencent/HunyuanVideo"
+VIDEO_PROVIDER = "replicate" 
+
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    client = InferenceClient(api_key=HF_TOKEN)
+    # Direct URL to the Hugging Face Router
+    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}"
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # We send the provider inside the JSON payload
+    payload = {
+        "inputs": prompt_text,
+        "provider": VIDEO_PROVIDER,
+        "parameters": {
+            "num_frames": 16,
+            "fps": 8
+        }
+    }
 
     try:
-        with st.spinner("🎥 Generating video via Replicate... (Approx 30-60s)"):
-            # We call Replicate through the HF Router
-            # Replicate's response schema is correctly handled by the library
-            result = client.text_to_video(
-                prompt=prompt_text,
-                model=VIDEO_MODEL,
-                extra_body={"provider": VIDEO_PROVIDER}
-            )
-
-            # Replicate usually returns the bytes directly or a simple URL
-            if isinstance(result, (bytes, bytearray)):
-                return result, "SUCCESS"
+        with st.spinner(f"🎥 Generating via {VIDEO_PROVIDER}..."):
+            # Using standard requests bypasses the broken HF library code
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
             
-            if isinstance(result, dict) and "url" in result:
-                video_bytes = requests.get(result["url"], timeout=60).content
-                return video_bytes, "SUCCESS"
+            if response.status_code != 200:
+                return None, f"API Error {response.status_code}: {response.text}"
 
-            return None, f"Unexpected response format from Replicate: {result}"
+            result = response.json()
+            
+            # Replicate/Router usually returns a dictionary with 'url'
+            video_url = None
+            if isinstance(result, dict):
+                video_url = result.get("url") or result.get("video", {}).get("url")
+            elif isinstance(result, list) and len(result) > 0:
+                video_url = result[0].get("url")
+
+            if video_url:
+                video_bytes = requests.get(video_url, timeout=60).content
+                return video_bytes, "SUCCESS"
+            
+            return None, f"Could not find URL in response: {result}"
 
     except Exception as e:
-        # If Replicate fails, we want the full story
         import traceback
         return None, traceback.format_exc()
 
