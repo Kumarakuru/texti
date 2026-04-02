@@ -60,28 +60,28 @@ def generate_image(prompt_text):
         return None, f"Connection Failed: {str(e)}"
 
 # --- Updated Configuration ---
- # --- Configuration ---
-# --- Stable Config ---
-# --- 2026 Stable Config ---
-VIDEO_MODEL = "Lightricks/LTX-Video"
+# --- 2026 Bulletproof Config ---
+VIDEO_MODEL = "Wan-AI/Wan2.1-T2V-1.3B" # The most stable 'warm' model on the router
+VIDEO_PROVIDER = "replicate"
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # The NEW 2026 Router Endpoint for Serverless Pipelines
-    # Note the '/hf-inference' prefix and '/pipeline/text-to-video' suffix
-    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}/pipeline/text-to-video"
+    # This is the 'Master' Router URL for Task-based inference in 2026
+    # We use the base model path and let the JSON payload define the task
+    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}"
     
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
-        "x-use-cache": "false"
+        "x-use-cache": "false",
+        "x-wait-for-model": "true"
     }
     
     payload = {
         "inputs": prompt_text,
-        "provider": "replicate", # Replicate is the most stable partner on the Router
+        "provider": VIDEO_PROVIDER,
         "parameters": {
             "num_frames": 16,
             "fps": 8
@@ -89,32 +89,31 @@ def generate_video(prompt_text):
     }
 
     try:
-        with st.spinner("🎥 Routing request to Replicate via HF Router..."):
-            # We use standard requests to bypass the buggy library code entirely
+        with st.spinner(f"🎥 Connecting to {VIDEO_PROVIDER} via Master Router..."):
             response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
             
+            # If we get a 404 here, the model is simply not on the serverless tier.
             if response.status_code != 200:
-                # If this 404s, it means the Router hasn't mapped this specific 
-                # model/pipeline combo yet.
                 return None, f"Router Error {response.status_code}: {response.text}"
 
             result = response.json()
             
-            # The Router returns a direct URL to the video file
+            # 2026 Router returns a 'url' key or a 'video' object
             video_url = None
             if isinstance(result, dict):
                 video_url = result.get("url") or result.get("video", {}).get("url")
-            
+            elif isinstance(result, list) and len(result) > 0:
+                video_url = result[0].get("url")
+
             if video_url:
                 video_bytes = requests.get(video_url, timeout=60).content
                 return video_bytes, "SUCCESS"
             
-            return None, f"No URL found in Router response: {result}"
+            return None, f"Request successful but no URL in response: {result}"
 
     except Exception as e:
         import traceback
         return None, traceback.format_exc()
-
 
 
 # --- UI ---
