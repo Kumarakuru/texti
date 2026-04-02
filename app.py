@@ -63,42 +63,42 @@ def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # Construct the API URL for the specific model
-    API_URL = f"https://api-inference.huggingface.co/models/{VIDEO_MODEL}"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-
-    payload = {
-        "inputs": prompt_text,
-        "parameters": {"num_frames": 16, "fps": 8},
-        "provider": VIDEO_PROVIDER
-    }
+    # Use the new router URL explicitly
+    client = InferenceClient(
+        api_key=HF_TOKEN,
+        base_url="https://router.huggingface.co/hf-inference"
+    )
 
     try:
         with st.spinner("🎥 Generating video..."):
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
-            
-            if response.status_code != 200:
-                return None, f"API Error {response.status_code}: {response.text}"
+            # Use the generic 'request' or task-specific method 
+            # Note: For Wan2.2, we use the provider-specific routing
+            result = client.text_to_video(
+                prompt=prompt_text,
+                model=VIDEO_MODEL,
+                # The 'provider' parameter is key for the new router
+                extra_body={
+                    "provider": VIDEO_PROVIDER,
+                    "num_frames": 16, 
+                    "fps": 8
+                }
+            )
 
-            result = response.json()
-            
-            # Defensive check for the URL in the response
-            video_url = None
-            if isinstance(result, dict):
-                # Try common paths for the URL
-                video_url = (
-                    result.get("url") or 
-                    result.get("output", {}).get("url") or 
-                    result.get("video", {}).get("url")
-                )
-            elif isinstance(result, list) and len(result) > 0:
-                video_url = result[0].get("url")
+            video_bytes = None
+            if isinstance(result, (bytes, bytearray)):
+                video_bytes = result
+            elif isinstance(result, dict):
+                # The router often returns a nested 'url' or 'video' object
+                video_data = result.get("video") or result.get("output") or result
+                if isinstance(video_data, dict) and "url" in video_data:
+                    video_bytes = requests.get(video_data["url"], timeout=60).content
+                elif isinstance(video_data, str) and video_data.startswith("http"):
+                    video_bytes = requests.get(video_data, timeout=60).content
 
-            if video_url:
-                video_bytes = requests.get(video_url, timeout=60).content
-                return video_bytes, "SUCCESS"
-            else:
-                return None, f"Unexpected response format: {result}"
+            if not video_bytes:
+                return None, f"Router returned unexpected format: {result}"
+
+        return video_bytes, "SUCCESS"
 
     except Exception as e:
         import traceback
