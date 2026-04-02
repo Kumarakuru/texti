@@ -62,44 +62,43 @@ def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
+    client = InferenceClient(api_key=HF_TOKEN)
 
     try:
         with st.spinner("🎥 Generating video..."):
-            result = client.text_to_video(
-                prompt=prompt_text,
+            # We use client.post to bypass the faulty internal 'text_to_video' helper
+            response = client.post(
+                json={
+                    "inputs": prompt_text,
+                    "parameters": {"num_frames": 16, "fps": 8}
+                },
                 model=VIDEO_MODEL,
-                extra_body={"num_frames": 16, "fps": 8}
+                # Explicitly route to fal-ai via header if needed, 
+                # or rely on the model/provider routing
+                headers={"x-use-cache": "false"} 
             )
             
-            # --- DEBUG: See the raw response ---
-            # st.write("Raw API Result:", result) 
+            import json
+            result = json.loads(response.decode("utf-8"))
+            
+            # Defensive parsing based on common fal-ai outputs
+            video_url = None
+            if isinstance(result, dict):
+                # Check for common fal-ai nesting patterns
+                video_url = (
+                    result.get("url") or 
+                    result.get("output", {}).get("url") or 
+                    result.get("video", {}).get("url")
+                )
 
-            video_bytes = None
+            if video_url:
+                video_bytes = requests.get(video_url, timeout=60).content
+                return video_bytes, "SUCCESS"
+            else:
+                return None, f"Could not find URL in response: {result}"
 
-            if isinstance(result, (bytes, bytearray)):
-                video_bytes = result
-            elif isinstance(result, dict):
-                # Check different possible structures
-                video_data = result.get("video") or result.get("output") or result
-                
-                if isinstance(video_data, dict) and "url" in video_data:
-                    video_url = video_data["url"]
-                    video_bytes = requests.get(video_url, timeout=60).content
-                elif isinstance(video_data, str) and video_data.startswith("http"):
-                    video_bytes = requests.get(video_data, timeout=60).content
-                elif isinstance(video_data, (bytes, bytearray)):
-                    video_bytes = video_data
-
-            if not video_bytes:
-                return None, f"Key mismatch or empty data. Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}"
-
-        return video_bytes, "SUCCESS"
-        
     except Exception as e:
-        # Capture the full traceback
-        error_details = traceback.format_exc()
-        return None, error_details
+        return None, traceback.format_exc()
 
 # --- UI ---
 default_prompt = "A cute cat meowing softly in a cozy room, realistic, detailed fur, warm lighting"
