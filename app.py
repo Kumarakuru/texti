@@ -5,6 +5,7 @@ from PIL import Image
 from huggingface_hub import InferenceClient
 import os
 import traceback  # Add this at the top
+import json
 
 # --- Page Setup ---
 st.set_page_config(page_title="✨ Media Creator", layout="centered")
@@ -62,42 +63,45 @@ def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    client = InferenceClient(api_key=HF_TOKEN)
+    # Construct the API URL for the specific model
+    API_URL = f"https://api-inference.huggingface.co/models/{VIDEO_MODEL}"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+    payload = {
+        "inputs": prompt_text,
+        "parameters": {"num_frames": 16, "fps": 8},
+        "provider": VIDEO_PROVIDER
+    }
 
     try:
         with st.spinner("🎥 Generating video..."):
-            # We use client.post to bypass the faulty internal 'text_to_video' helper
-            response = client.post(
-                json={
-                    "inputs": prompt_text,
-                    "parameters": {"num_frames": 16, "fps": 8}
-                },
-                model=VIDEO_MODEL,
-                # Explicitly route to fal-ai via header if needed, 
-                # or rely on the model/provider routing
-                headers={"x-use-cache": "false"} 
-            )
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
             
-            import json
-            result = json.loads(response.decode("utf-8"))
+            if response.status_code != 200:
+                return None, f"API Error {response.status_code}: {response.text}"
+
+            result = response.json()
             
-            # Defensive parsing based on common fal-ai outputs
+            # Defensive check for the URL in the response
             video_url = None
             if isinstance(result, dict):
-                # Check for common fal-ai nesting patterns
+                # Try common paths for the URL
                 video_url = (
                     result.get("url") or 
                     result.get("output", {}).get("url") or 
                     result.get("video", {}).get("url")
                 )
+            elif isinstance(result, list) and len(result) > 0:
+                video_url = result[0].get("url")
 
             if video_url:
                 video_bytes = requests.get(video_url, timeout=60).content
                 return video_bytes, "SUCCESS"
             else:
-                return None, f"Could not find URL in response: {result}"
+                return None, f"Unexpected response format: {result}"
 
     except Exception as e:
+        import traceback
         return None, traceback.format_exc()
 
 # --- UI ---
