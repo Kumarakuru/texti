@@ -64,50 +64,38 @@ def generate_image(prompt_text):
 VIDEO_MODEL = "tencent/HunyuanVideo" 
 VIDEO_PROVIDER = "hf-inference" # Use Hugging Face's own router
 
+# --- Updated Configuration ---
+VIDEO_MODEL = "Lightricks/LTX-Video" 
+VIDEO_PROVIDER = "replicate"  # Switching to the stable provider
+
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # Initialize client WITHOUT a custom base_url to avoid 404s
     client = InferenceClient(api_key=HF_TOKEN)
 
     try:
-        with st.spinner("🎥 Generating video..."):
-            # Use the high-level method but add the provider in extra_body
-            # This is the standard 2026 way to route to fal-ai
+        with st.spinner("🎥 Generating video via Replicate... (Approx 30-60s)"):
+            # We call Replicate through the HF Router
+            # Replicate's response schema is correctly handled by the library
             result = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
-                extra_body={"provider": "fal-ai", "num_frames": 16}
+                extra_body={"provider": VIDEO_PROVIDER}
             )
 
-            # --- THE SAFETY NET ---
-            # We manually check the result so the library doesn't crash us
-            video_url = None
-            
-            # If the result is already bytes, we are done!
+            # Replicate usually returns the bytes directly or a simple URL
             if isinstance(result, (bytes, bytearray)):
                 return result, "SUCCESS"
-
-            # If it's a dict, we hunt for the URL safely
-            if isinstance(result, dict):
-                # We use .get() which returns None instead of crashing with KeyError
-                video_url = (
-                    result.get("url") or 
-                    result.get("video", {}).get("url") if isinstance(result.get("video"), dict) else None or
-                    result.get("output", {}).get("url") if isinstance(result.get("output"), dict) else None
-                )
-
-            if video_url:
-                video_bytes = requests.get(video_url, timeout=60).content
-                return video_bytes, "SUCCESS"
             
-            return None, f"Response received but no URL found: {result}"
+            if isinstance(result, dict) and "url" in result:
+                video_bytes = requests.get(result["url"], timeout=60).content
+                return video_bytes, "SUCCESS"
+
+            return None, f"Unexpected response format from Replicate: {result}"
 
     except Exception as e:
-        # If the INTERNAL library code still throws a KeyError, catch it here
-        if "KeyError: 'video'" in str(e):
-            return None, "HF Library Bug: The provider returned data but the library couldn't read it. Try switching VIDEO_PROVIDER to 'replicate' in CONFIG."
+        # If Replicate fails, we want the full story
         import traceback
         return None, traceback.format_exc()
 
