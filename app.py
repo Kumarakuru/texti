@@ -62,53 +62,54 @@ def generate_image(prompt_text):
 # --- Updated Configuration ---
  # --- Configuration ---
 # --- Stable Config ---
+# --- 2026 Stable Config ---
 VIDEO_MODEL = "tencent/HunyuanVideo"
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
         return None, "HF_TOKEN is missing."
 
-    # This is the canonical 2026 Router URL
-    API_URL = f"https://api-inference.huggingface.co/models/{VIDEO_MODEL}"
+    # The NEW 2026 Router Endpoint for Serverless Pipelines
+    # Note the '/hf-inference' prefix and '/pipeline/text-to-video' suffix
+    API_URL = f"https://router.huggingface.co/hf-inference/models/{VIDEO_MODEL}/pipeline/text-to-video"
     
     headers = {
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
-        "x-use-cache": "false",
-        "x-wait-for-model": "true"
+        "x-use-cache": "false"
     }
     
     payload = {
         "inputs": prompt_text,
+        "provider": "replicate", # Replicate is the most stable partner on the Router
         "parameters": {
             "num_frames": 16,
             "fps": 8
-        },
-        # 'auto' lets the HF Router pick the provider that ISN'T broken
-        "provider": "auto" 
+        }
     }
 
     try:
-        with st.spinner("🎥 Router is finding a provider and generating..."):
+        with st.spinner("🎥 Routing request to Replicate via HF Router..."):
+            # We use standard requests to bypass the buggy library code entirely
             response = requests.post(API_URL, headers=headers, json=payload, timeout=300)
             
             if response.status_code != 200:
+                # If this 404s, it means the Router hasn't mapped this specific 
+                # model/pipeline combo yet.
                 return None, f"Router Error {response.status_code}: {response.text}"
 
             result = response.json()
             
-            # Defensive parsing for the video URL
+            # The Router returns a direct URL to the video file
             video_url = None
             if isinstance(result, dict):
-                video_url = result.get("url") or result.get("video", {}).get("url") or result.get("output")
-            elif isinstance(result, list) and len(result) > 0:
-                video_url = result[0].get("url") if isinstance(result[0], dict) else result[0]
-
-            if video_url and isinstance(video_url, str) and video_url.startswith("http"):
+                video_url = result.get("url") or result.get("video", {}).get("url")
+            
+            if video_url:
                 video_bytes = requests.get(video_url, timeout=60).content
                 return video_bytes, "SUCCESS"
             
-            return None, f"Task finished but could not find URL. Response: {result}"
+            return None, f"No URL found in Router response: {result}"
 
     except Exception as e:
         import traceback
