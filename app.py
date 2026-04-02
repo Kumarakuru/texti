@@ -4,6 +4,7 @@ import io
 from PIL import Image
 from huggingface_hub import InferenceClient
 import os
+import traceback  # Add this at the top
 
 # --- Page Setup ---
 st.set_page_config(page_title="✨ Media Creator", layout="centered")
@@ -59,58 +60,46 @@ def generate_image(prompt_text):
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
-        return None, "HF_TOKEN is missing. Please add it in Streamlit secrets."
+        return None, "HF_TOKEN is missing."
 
     client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
 
     try:
-        with st.spinner("🎥 Generating video... (40–120 seconds)"):
-            # Call the model
+        with st.spinner("🎥 Generating video..."):
             result = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
                 extra_body={"num_frames": 16, "fps": 8}
             )
-
-            # Debugging: Uncomment the line below to see the actual structure in your logs
-            # st.write(result) 
+            
+            # --- DEBUG: See the raw response ---
+            # st.write("Raw API Result:", result) 
 
             video_bytes = None
 
-            # 1. Handle Direct Bytes
             if isinstance(result, (bytes, bytearray)):
                 video_bytes = result
-            
-            # 2. Handle Dictionary Response
             elif isinstance(result, dict):
-                # Try common keys used by fal-ai and HF Inference Endpoints
-                video_url = None
+                # Check different possible structures
+                video_data = result.get("video") or result.get("output") or result
                 
-                # Check for nested 'url' in common keys
-                for key in ["video", "output", "data"]:
-                    val = result.get(key)
-                    if isinstance(val, dict) and "url" in val:
-                        video_url = val["url"]
-                        break
-                    elif isinstance(val, str) and val.startswith("http"):
-                        video_url = val
-                        break
-                
-                # If no key found, check if the top-level dict has a 'url'
-                if not video_url and "url" in result:
-                    video_url = result["url"]
+                if isinstance(video_data, dict) and "url" in video_data:
+                    video_url = video_data["url"]
+                    video_bytes = requests.get(video_url, timeout=60).content
+                elif isinstance(video_data, str) and video_data.startswith("http"):
+                    video_bytes = requests.get(video_data, timeout=60).content
+                elif isinstance(video_data, (bytes, bytearray)):
+                    video_bytes = video_data
 
-                if video_url:
-                    response = requests.get(video_url, timeout=60)
-                    if response.status_code == 200:
-                        video_bytes = response.content
-            
             if not video_bytes:
-                return None, f"Could not extract video data. Response received: {result}"
+                return None, f"Key mismatch or empty data. Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}"
 
         return video_bytes, "SUCCESS"
+        
     except Exception as e:
-        return None, f"Video generationing failed: {str(e)}"
+        # Capture the full traceback
+        error_details = traceback.format_exc()
+        return None, error_details
 
 # --- UI ---
 default_prompt = "A cute cat meowing softly in a cozy room, realistic, detailed fur, warm lighting"
@@ -148,8 +137,9 @@ if st.button(f"✨ Generate {gen_mode}"):
                         "generated_video.mp4", 
                         "video/mp4"
                     )
-                else:
-                    st.error(status)
+                else:                                        
+                    st.error("Video Generation Failed")
+                    st.code(status, language="python") # This will display the full traceback in a scrollable box
 
 st.divider()
 st.info("Video uses pay-per-use Inference Providers and takes longer than images.")
