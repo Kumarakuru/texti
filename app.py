@@ -28,15 +28,14 @@ st.caption("Image: Dedicated Endpoint • Video: Inference Providers")
 # --- CONFIGURATION ---
 IMAGE_API_URL = "https://ylouolgkl7x17uss.eu-west-1.aws.endpoints.huggingface.cloud"
 
-# Reliable text-to-video model + provider
 VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
 VIDEO_PROVIDER = "fal-ai"
 
 HF_TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
 
 def process_image_response(response):
-    ctype = response.headers.get("Content-Type", "")
     if response.status_code == 200:
+        ctype = response.headers.get("Content-Type", "")
         if "image" in ctype or "octet-stream" in ctype:
             return response.content, "SUCCESS"
     return None, f"Error {response.status_code}: {response.text[:300]}"
@@ -65,33 +64,30 @@ def generate_video(prompt_text):
     client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
 
     try:
-        with st.spinner("🎥 Generating video... (this can take 40–120 seconds)"):
+        with st.spinner("🎥 Generating video... (40–120 seconds)"):
             result = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
-                extra_body={
-                    "num_frames": 16,
-                    "fps": 8,
-                }
+                extra_body={"num_frames": 16, "fps": 8}
             )
 
-            # Handle different possible return types
+            # Robust handling for different return formats
             if isinstance(result, (bytes, bytearray)):
                 video_bytes = result
             elif isinstance(result, dict):
-                # Common cases: result may contain 'video' key or 'blob'
-                video_bytes = result.get("video") or result.get("blob") or result.get("output")
-                if isinstance(video_bytes, dict) and "url" in video_bytes:
-                    # If it's a URL, download it
-                    import requests as req
-                    video_bytes = req.get(video_bytes["url"]).content
-                elif not isinstance(video_bytes, (bytes, bytearray)):
-                    video_bytes = None
+                # Most common: {"video": {"url": "..."}}
+                video_data = result.get("video") or result.get("output") or result
+                if isinstance(video_data, dict) and "url" in video_data:
+                    video_url = video_data["url"]
+                    video_bytes = requests.get(video_url, timeout=60).content
+                else:
+                    # Fallback if bytes are directly in the dict
+                    video_bytes = video_data if isinstance(video_data, (bytes, bytearray)) else None
             else:
                 video_bytes = None
 
             if not video_bytes:
-                return None, "Received invalid video data from provider."
+                return None, "Failed to retrieve video data from provider."
 
         return video_bytes, "SUCCESS"
     except Exception as e:
@@ -119,7 +115,6 @@ if st.button(f"✨ Generate {gen_mode}"):
                     st.download_button("⬇️ Download PNG", buf.getvalue(), "output.png", "image/png")
                 else:
                     st.error(status)
-
         else:  # Video
             if not HF_TOKEN:
                 st.error("HF_TOKEN is required for video generation.")
@@ -138,4 +133,4 @@ if st.button(f"✨ Generate {gen_mode}"):
                     st.error(status)
 
 st.divider()
-st.info("**Note:** Video generation uses pay-per-use Inference Providers and can take longer than images.")
+st.info("Video uses pay-per-use Inference Providers and takes longer than images.")
