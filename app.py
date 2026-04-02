@@ -23,13 +23,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎬 Media Creator")
-st.caption("Image: Dedicated Endpoint • Video: Inference Providers (fal-ai)")
+st.caption("Image: Dedicated Endpoint • Video: Inference Providers")
 
 # --- CONFIGURATION ---
 IMAGE_API_URL = "https://ylouolgkl7x17uss.eu-west-1.aws.endpoints.huggingface.cloud"
 
-# Video Configuration - Changed to a proper text-to-video model
-VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"     # Good quality + supported for text-to-video
+# Reliable text-to-video model + provider
+VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
 VIDEO_PROVIDER = "fal-ai"
 
 HF_TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
@@ -60,40 +60,45 @@ def generate_image(prompt_text):
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
-        return None, "❌ HF_TOKEN is missing. Add it in Streamlit secrets or as environment variable."
+        return None, "HF_TOKEN is missing. Please add it in Streamlit secrets."
 
     client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
 
     try:
-        with st.spinner("🎥 Generating video... (this usually takes 40–120 seconds)"):
-            video_bytes = client.text_to_video(
+        with st.spinner("🎥 Generating video... (this can take 40–120 seconds)"):
+            result = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
                 extra_body={
-                    "num_frames": 16,   # Short video (~2 seconds at 8 fps)
+                    "num_frames": 16,
                     "fps": 8,
                 }
             )
+
+            # Handle different possible return types
+            if isinstance(result, (bytes, bytearray)):
+                video_bytes = result
+            elif isinstance(result, dict):
+                # Common cases: result may contain 'video' key or 'blob'
+                video_bytes = result.get("video") or result.get("blob") or result.get("output")
+                if isinstance(video_bytes, dict) and "url" in video_bytes:
+                    # If it's a URL, download it
+                    import requests as req
+                    video_bytes = req.get(video_bytes["url"]).content
+                elif not isinstance(video_bytes, (bytes, bytearray)):
+                    video_bytes = None
+            else:
+                video_bytes = None
+
+            if not video_bytes:
+                return None, "Received invalid video data from provider."
+
         return video_bytes, "SUCCESS"
     except Exception as e:
-        error_str = str(e).lower()
-        # Auto fallback if provider/model issue
-        if "not supported" in error_str or "fal-ai" in error_str:
-            try:
-                st.info("Trying with auto provider selection...")
-                client = InferenceClient(provider="auto", api_key=HF_TOKEN)
-                video_bytes = client.text_to_video(prompt=prompt_text, model=VIDEO_MODEL)
-                return video_bytes, "SUCCESS (auto provider)"
-            except Exception as e2:
-                return None, f"Failed with auto provider: {str(e2)}"
         return None, f"Video generation failed: {str(e)}"
 
 # --- UI ---
-default_prompt = (
-    "Cinematic photorealistic shot of Adiyogi Shiva statue, majestic black steel, "
-    "crescent moon in hair, third eye, Velliangiri mountains background, "
-    "night time, atmospheric lighting, hyper-detailed, 8k resolution"
-)
+default_prompt = "A cute cat meowing softly in a cozy room, realistic, detailed fur, warm lighting"
 
 prompt = st.text_area("Scene Description", value=default_prompt, height=120)
 
@@ -115,14 +120,13 @@ if st.button(f"✨ Generate {gen_mode}"):
                 else:
                     st.error(status)
 
-        else:  # Video mode
+        else:  # Video
             if not HF_TOKEN:
                 st.error("HF_TOKEN is required for video generation.")
-                st.info("Create a token at https://huggingface.co/settings/tokens (with inference permission) and add it as secret `HF_TOKEN`")
             else:
                 video_bytes, status = generate_video(prompt)
                 
-                if status.startswith("SUCCESS"):
+                if status == "SUCCESS" and video_bytes:
                     st.video(video_bytes)
                     st.download_button(
                         "⬇️ Download Video", 
@@ -134,13 +138,4 @@ if st.button(f"✨ Generate {gen_mode}"):
                     st.error(status)
 
 st.divider()
-st.info("""
-**Current Setup:**
-- **Image**: Your dedicated fast endpoint
-- **Video**: Wan-AI/Wan2.2-TI2V-5B via fal-ai (proper text-to-video model)
-
-**Tips:**
-- Start with short, simple prompts to save credits.
-- Video generation is slower and more expensive than images.
-- If you still get errors, try changing `VIDEO_MODEL` to `"tencent/HunyuanVideo"` or `"Wan-AI/Wan2.1-T2V-14B"`.
-""")
+st.info("**Note:** Video generation uses pay-per-use Inference Providers and can take longer than images.")
