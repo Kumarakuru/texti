@@ -62,7 +62,7 @@ def generate_image(prompt_text):
 # --- Updated Configuration ---
  # --- Configuration ---
 VIDEO_MODEL = "tencent/HunyuanVideo" # Most robust for T2V
-VIDEO_PROVIDER = "replicate"        # Stable alternative to fal-ai
+VIDEO_PROVIDER = "auto"        # Stable alternative to fal-ai
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
