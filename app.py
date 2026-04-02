@@ -23,14 +23,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎬 Media Creator")
-st.caption("Image: Dedicated Endpoint • Video: Inference Providers (fal)")
+st.caption("Image: Dedicated Endpoint • Video: Inference Providers")
 
 # --- CONFIGURATION ---
 IMAGE_API_URL = "https://ylouolgkl7x17uss.eu-west-1.aws.endpoints.huggingface.cloud"
 
-# Video Configuration - Recommended settings
-VIDEO_MODEL = "Lightricks/LTX-Video"      # Good balance of speed & quality
-VIDEO_PROVIDER = "fal"                    # "fal", "replicate", or "hyperbolic"
+# Recommended Video Settings
+VIDEO_MODEL = "Lightricks/LTX-Video"      # Change if you want to try another model
+VIDEO_PROVIDER = "fal-ai"                 # Fixed: Use 'fal-ai' (not 'fal')
 
 HF_TOKEN = st.secrets.get("HF_TOKEN") or os.getenv("HF_TOKEN")
 
@@ -60,36 +60,36 @@ def generate_image(prompt_text):
 
 def generate_video(prompt_text):
     if not HF_TOKEN:
-        return None, "❌ HF_TOKEN is missing. Please add it in Streamlit secrets or as environment variable."
+        return None, "❌ HF_TOKEN is missing. Add it in Streamlit secrets or environment variables."
 
     client = InferenceClient(provider=VIDEO_PROVIDER, api_key=HF_TOKEN)
 
     try:
-        with st.spinner("🎥 Generating video... This can take 30–90 seconds depending on the provider."):
+        with st.spinner("🎥 Generating video... (usually 30–90 seconds)"):
+            # Most providers accept parameters via extra_body for text_to_video
             video_bytes = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
                 extra_body={
-                    "num_frames": 16,      # Short video (adjust if model supports)
-                    "fps": 8,              # Frames per second
-                    # You can add more provider-specific params here if needed
+                    "num_frames": 16,   # Short clip
+                    "fps": 8,
                 }
             )
         return video_bytes, "SUCCESS"
     except Exception as e:
-        error_msg = str(e)
-        if "unexpected keyword" in error_msg.lower():
-            error_msg = "Parameter error. Trying without extra parameters..."
-            # Fallback: try without extra_body
+        error_str = str(e).lower()
+        if "not supported" in error_str or "fal-ai" in error_str:
+            # Fallback: Let HF auto-select the best available provider for this model
             try:
+                client = InferenceClient(provider="auto", api_key=HF_TOKEN)
                 video_bytes = client.text_to_video(
                     prompt=prompt_text,
                     model=VIDEO_MODEL
                 )
-                return video_bytes, "SUCCESS"
+                return video_bytes, "SUCCESS (auto provider)"
             except Exception as e2:
-                error_msg = str(e2)
-        return None, f"Video generation failed: {error_msg}"
+                return None, f"Video failed: {str(e2)}"
+        return None, f"Video generation failed: {str(e)}"
 
 # --- UI ---
 default_prompt = (
@@ -118,15 +118,15 @@ if st.button(f"✨ Generate {gen_mode}"):
                 else:
                     st.error(status)
 
-        else:  # Video mode
+        else:  # Video
             if not HF_TOKEN:
-                st.error("HF_TOKEN is required for video generation.")
-                st.info("→ Create a token at https://huggingface.co/settings/tokens and add it as secret `HF_TOKEN`")
+                st.error("HF_TOKEN is required for video.")
+                st.info("Create a token at https://huggingface.co/settings/tokens and add it as secret `HF_TOKEN`")
             else:
                 video_bytes, status = generate_video(prompt)
                 
-                if status == "SUCCESS":
-                    st.video(video_bytes, autoplay=False)
+                if status.startswith("SUCCESS"):
+                    st.video(video_bytes)
                     st.download_button(
                         "⬇️ Download Video", 
                         video_bytes, 
@@ -136,5 +136,6 @@ if st.button(f"✨ Generate {gen_mode}"):
                 else:
                     st.error(status)
 
-st.divider()
+st.divider() 
+
 st.markdown("Made with ❤️ by Isha - Powered by Hugging Face & Streamlit")
