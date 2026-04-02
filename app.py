@@ -110,7 +110,7 @@ def generate_video(prompt_text):
 
         return video_bytes, "SUCCESS"
     except Exception as e:
-        return None, f"Video generation failed: {str(e)}"
+        return None, f"Video generationing failed: {str(e)}"
 
 # --- UI ---
 default_prompt = "A cute cat meowing softly in a cozy room, realistic, detailed fur, warm lighting"
