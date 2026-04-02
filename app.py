@@ -65,29 +65,48 @@ def generate_video(prompt_text):
 
     try:
         with st.spinner("🎥 Generating video... (40–120 seconds)"):
+            # Call the model
             result = client.text_to_video(
                 prompt=prompt_text,
                 model=VIDEO_MODEL,
                 extra_body={"num_frames": 16, "fps": 8}
             )
 
-            # Robust handling for different return formats
+            # Debugging: Uncomment the line below to see the actual structure in your logs
+            # st.write(result) 
+
+            video_bytes = None
+
+            # 1. Handle Direct Bytes
             if isinstance(result, (bytes, bytearray)):
                 video_bytes = result
+            
+            # 2. Handle Dictionary Response
             elif isinstance(result, dict):
-                # Most common: {"video": {"url": "..."}}
-                video_data = result.get("video") or result.get("output") or result
-                if isinstance(video_data, dict) and "url" in video_data:
-                    video_url = video_data["url"]
-                    video_bytes = requests.get(video_url, timeout=60).content
-                else:
-                    # Fallback if bytes are directly in the dict
-                    video_bytes = video_data if isinstance(video_data, (bytes, bytearray)) else None
-            else:
-                video_bytes = None
+                # Try common keys used by fal-ai and HF Inference Endpoints
+                video_url = None
+                
+                # Check for nested 'url' in common keys
+                for key in ["video", "output", "data"]:
+                    val = result.get(key)
+                    if isinstance(val, dict) and "url" in val:
+                        video_url = val["url"]
+                        break
+                    elif isinstance(val, str) and val.startswith("http"):
+                        video_url = val
+                        break
+                
+                # If no key found, check if the top-level dict has a 'url'
+                if not video_url and "url" in result:
+                    video_url = result["url"]
 
+                if video_url:
+                    response = requests.get(video_url, timeout=60)
+                    if response.status_code == 200:
+                        video_bytes = response.content
+            
             if not video_bytes:
-                return None, "Failed to retrieve video data from provider."
+                return None, f"Could not extract video data. Response received: {result}"
 
         return video_bytes, "SUCCESS"
     except Exception as e:
